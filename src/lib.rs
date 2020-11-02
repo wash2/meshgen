@@ -69,7 +69,8 @@ pub extern "C" fn fill_array(buf: ptr::NonNull<i32>, len: usize) -> usize {
     len
 }
 
-// future goals: generate different functions for each type permutation... Vertex<f32, half::f16 | f32, u8 | f32>
+// future goals: generate different wrapper functions for each type permutation and make get_plane generic...
+//  Vertex<f32, half::f16 | f32, u8 | f32>
 #[no_mangle]
 pub extern "C" fn get_plane(buf: ptr::NonNull<Vertex>, len: usize) -> usize {
     let side_len =  (len as f64).sqrt() as usize;
@@ -98,4 +99,4 @@ pub extern "C" fn get_plane(buf: ptr::NonNull<Vertex>, len: usize) -> usize {
     });
 
     v_count
-    }
+}
