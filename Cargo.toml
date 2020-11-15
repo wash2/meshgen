@@ -12,4 +12,5 @@ crate-type = ["dylib"]
 
 [dependencies]
 rayon = "1.5"
-half = "1.4"
+half = "1.6"
+noise = "0.6"
