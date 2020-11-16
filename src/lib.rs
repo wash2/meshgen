@@ -1,7 +1,7 @@
 use std::{convert::TryInto, convert::TryFrom, ptr, mem};
 use rayon::{prelude::*};
 use half::f16;
-use noise;
+use noise::{self, NoiseFn};
 
 #[derive(Clone, Copy, Default)]
 #[repr(C)]
@@ -78,11 +78,16 @@ pub struct Quad {
     v6: i32,
 }
 
+struct Flat {}
+impl<T> NoiseFn<T> for Flat {
+    fn get(&self, point: T) -> f64 {0f64}
+}
+
 #[repr(C)]
 enum PlaneType
 {
     Flat,
-    FBM,
+    Fbm,
     Worley,
 }
 
@@ -92,7 +97,7 @@ impl TryFrom<i32> for PlaneType {
     fn try_from(v: i32) -> Result<Self, Self::Error> {
         match v {
             x if x == PlaneType::Flat as i32 => Ok(PlaneType::Flat),
-            x if x == PlaneType::FBM as i32 => Ok(PlaneType::FBM),
+            x if x == PlaneType::Fbm as i32 => Ok(PlaneType::Fbm),
             x if x == PlaneType::Worley as i32 => Ok(PlaneType::Worley),
             _ => Err(()),
         }
@@ -122,12 +127,19 @@ fn fill_plane_buffers(v_buffer: &mut [Vertex], indx_buffer: &mut [Quad], side_le
     let half_side_len = side_len as f32 / 2f32;
     let vert_side: i32 = (side_len + 1).try_into().unwrap();
 
+    let height_fn: Box<dyn NoiseFn<[f64; 2]> + Sync> = match plane_type {
+        PlaneType::Flat => Box::new(Flat{}),
+        PlaneType::Fbm => Box::new(noise::Fbm::new()),
+        PlaneType::Worley => Box::new(noise::Worley::new()),
+    };
+
     v_buffer.par_iter_mut().enumerate().for_each(|(i, cur_v)| {
-        
+        let x_pos = -half_side_len + (i as i32 % vert_side) as f32;
+        let z_pos = -half_side_len + (i as i32 / vert_side) as f32;
         cur_v.pos = Position32{
-            x: (-half_side_len + (i as i32 % vert_side) as f32),
-            y: (0f32),
-            z: (-half_side_len + (i as i32 / vert_side) as f32)
+            x: x_pos,
+            y: height_fn.get([x_pos.into(), z_pos.into()]) as f32,
+            z: z_pos
         };
         cur_v.norm = Normal32{
             x: (0f32), 

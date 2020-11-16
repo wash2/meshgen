@@ -10,7 +10,7 @@ using System;
 public class Plane : MonoBehaviour
 {
     [DllImport("meshgen")]
-    private static extern IntPtr fill_plane(IntPtr vbuf, IntPtr ibuf, UIntPtr sideLength);
+    private static extern IntPtr fill_plane(IntPtr vbuf, IntPtr ibuf, UIntPtr sideLength, int planeType);
     [DllImport("meshgen")]
     private static extern IntPtr get_plane_desc(UIntPtr sideLength, out int vCnt, out int eCnt, out int fCnt);
     
@@ -23,11 +23,18 @@ public class Plane : MonoBehaviour
         public Vector2 uv;
     }
 
+    enum PlaneType
+    {
+        Flat,
+        Fbm,
+        Worley,
+    }
+
     Vector3[] newVertices;
     Vector2[] newUV;
     int[] newTriangles;
 
-    public UIntPtr sideLength = (UIntPtr)10000;
+    public UIntPtr sideLength = (UIntPtr)1000;
     public float frequency;
     public Material m_Material;
 
@@ -66,7 +73,7 @@ public class Plane : MonoBehaviour
             var verts = new NativeArray<ExampleVertex>(vertexCount, Allocator.Temp);
             var tris = new NativeArray<int>(faceCount * 3, Allocator.Temp);
             res = Marshal.PtrToStringAnsi(
-                fill_plane(new IntPtr(NativeArrayUnsafeUtility.GetUnsafePtr(verts)), new IntPtr(NativeArrayUnsafeUtility.GetUnsafePtr(tris)), sideLength)
+                fill_plane(new IntPtr(NativeArrayUnsafeUtility.GetUnsafePtr(verts)), new IntPtr(NativeArrayUnsafeUtility.GetUnsafePtr(tris)), sideLength, (int)PlaneType.Fbm)
             );
             if (!res.Equals("OK")) {
                 Debug.Log(res);
@@ -83,6 +90,7 @@ public class Plane : MonoBehaviour
 
             var meshDesc = new UnityEngine.Rendering.SubMeshDescriptor(0, faceCount * 3, MeshTopology.Triangles);
             mesh.SetSubMesh(0, meshDesc);
+            Debug.Log(Time.realtimeSinceStartup - t0);
         }
 
         // Marshal rust created buffers - Seems unlikely to work well....
