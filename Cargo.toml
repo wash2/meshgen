@@ -8,9 +8,14 @@ edition = "2018"
 
 [lib]
 name = "meshgen"
-crate-type = ["dylib"]
+crate-types = ["rlib", "dylib", "bin"]
+
+[[bin]]
+name = "meshgenbin"
+path = "src/bin.rs"
 
 [dependencies]
 rayon = "1.5"
 half = "1.6"
 noise = "0.6"
+more-asserts = "0.2.1"

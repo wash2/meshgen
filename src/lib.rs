@@ -1,16 +1,19 @@
-use std::{convert::TryInto, convert::TryFrom, ptr, mem};
+extern crate more_asserts;
+
+use std::{ops::Mul, convert::TryFrom, convert::TryInto, mem, ops::Add, ptr};
 use rayon::{prelude::*};
 use half::f16;
 use noise::{self, NoiseFn};
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, PartialOrd, Debug)]
 #[repr(C)]
 struct Position32 {
     x: f32,
     y: f32,
     z: f32,
 }
-#[derive(Clone, Copy, Default)]
+
+#[derive(Clone, Copy, Default, PartialEq, PartialOrd, Debug)]
 #[repr(C)]
 struct Normal16 {
     x: f16,
@@ -18,14 +21,14 @@ struct Normal16 {
     z: f16,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, PartialOrd, Debug)]
 #[repr(C)]
 struct Normal32 {
     x: f32,
     y: f32,
     z: f32,
 }
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, PartialOrd, Debug)]
 #[repr(C)]
 struct Tangent32 {
     w: f32,
@@ -34,7 +37,7 @@ struct Tangent32 {
     z: f32,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Debug)]
 #[repr(C)]
 struct TangentU8 {
     w: u8,
@@ -43,14 +46,14 @@ struct TangentU8 {
     z: u8,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, PartialOrd, Debug)]
 #[repr(C)]
 struct TexCoord32 {
     u: f32,
     v: f32
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, PartialOrd, Debug)]
 #[repr(C)]
 pub struct Vertex {
     pos: Position32,
@@ -59,7 +62,7 @@ pub struct Vertex {
     uv: TexCoord32,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 #[repr(C)]
 pub struct Triangle {
     v1: i32,
@@ -67,7 +70,7 @@ pub struct Triangle {
     v3: i32
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 #[repr(C)]
 pub struct Quad {
     v1: i32,
@@ -78,15 +81,67 @@ pub struct Quad {
     v6: i32,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+#[repr(C)]
+pub struct Color32 {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
+}
+
+impl Add for Color32 {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            r: (self.r as i32 + other.r as i32).min(255).max(0) as u8,
+            g: (self.g as i32 + other.g as i32).min(255).max(0) as u8,
+            b: (self.b as i32 + other.b as i32).min(255).max(0) as u8,
+            a: (self.a as i32 + other.a as i32).min(255).max(0) as u8,
+        }
+    }
+}
+
+impl Mul<f64> for Color32 {
+    type Output = Self;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self {
+            r: (self.r as f64 * rhs).min(255.0).max(0.0).round() as u8,
+            g: (self.g as f64 * rhs).min(255.0).max(0.0).round() as u8,
+            b: (self.b as f64 * rhs).min(255.0).max(0.0).round() as u8,
+            a: (self.a as f64 * rhs).min(255.0).max(0.0).round() as u8,
+        }
+    }
+}
+
+trait Lerp {
+    fn lerp(self, other: Self, t: f64) -> Self;
+    fn lerp_bounded(self, other: Self, t: f64) -> Self;
+}
+
+impl<T> Lerp for T where T: Add<T, Output = T> + Mul<f64, Output = T> + Copy {
+    fn lerp(self, other: Self, t: f64) -> T {
+        self * (1.0 - t) + other * t
+    }
+
+    fn lerp_bounded(self, other: Self, t: f64) -> T {
+        let t = t.min(1_f64).max(0_f64);
+        self.lerp(other,t)
+    }
+}
+
 struct Flat {}
 impl<T> NoiseFn<T> for Flat {
-    fn get(&self, point: T) -> f64 {0f64}
+    fn get(&self, _point: T) -> f64 {0f64}
 }
 
 #[repr(C)]
-enum PlaneType
+pub enum PlaneType
 {
     Flat,
+    Perlin,
     Fbm,
     Worley,
 }
@@ -97,6 +152,7 @@ impl TryFrom<i32> for PlaneType {
     fn try_from(v: i32) -> Result<Self, Self::Error> {
         match v {
             x if x == PlaneType::Flat as i32 => Ok(PlaneType::Flat),
+            x if x == PlaneType::Perlin as i32 => Ok(PlaneType::Perlin),
             x if x == PlaneType::Fbm as i32 => Ok(PlaneType::Fbm),
             x if x == PlaneType::Worley as i32 => Ok(PlaneType::Worley),
             _ => Err(()),
@@ -128,9 +184,10 @@ fn fill_plane_buffers(v_buffer: &mut [Vertex], indx_buffer: &mut [Quad], side_le
     let vert_side: i32 = (side_len + 1).try_into().unwrap();
 
     let height_fn: Box<dyn NoiseFn<[f64; 2]> + Sync> = match plane_type {
-        PlaneType::Flat => Box::new(Flat{}),
+        PlaneType::Perlin => Box::new(noise::Perlin::new()),
         PlaneType::Fbm => Box::new(noise::Fbm::new()),
         PlaneType::Worley => Box::new(noise::Worley::new()),
+        PlaneType::Flat => Box::new(Flat{}),
     };
 
     v_buffer.par_iter_mut().enumerate().for_each(|(i, cur_v)| {
@@ -223,6 +280,36 @@ pub extern "C" fn get_plane(vptr: *mut *const Vertex, iptr: *mut *const Quad, si
     0
 }
 
+#[no_mangle]
+pub extern "C" fn fill_texture_2d(bufptr: ptr::NonNull<Color32>, width: usize, height: usize, scale: f32, tex_noise: i32) -> *const u8 {
+    match tex_noise.try_into() {
+        Ok(tex_noise) => {
+            let pix_cnt = width * height;
+            let tx_buffer: &mut [Color32] = unsafe { std::slice::from_raw_parts_mut(bufptr.as_ptr(), pix_cnt) };
+
+            fill_texture_buffer_2d(tx_buffer, width, height, scale, tex_noise);
+            "OK\0".as_ptr()
+        },
+        Err(_) => "Invalid tex noise type requested.\0".as_ptr()
+    }
+}
+
+pub fn fill_texture_buffer_2d(tx_buffer: &mut [Color32], width: usize, height: usize, scale: f32, tex_noise: PlaneType) {
+    let noise_fn: Box<dyn NoiseFn<[f64; 2]> + Sync> = match tex_noise {
+        PlaneType::Perlin => Box::new(noise::Perlin::new()),
+        PlaneType::Fbm => Box::new(noise::Fbm::new()),
+        PlaneType::Worley => Box::new(noise::Worley::new()),
+        PlaneType::Flat => Box::new(Flat{}),
+    };
+
+    let black = Color32{r: 0, g: 0, b: 0, a: 255};
+    let white = Color32{r: 255, g: 255, b: 255, a: 255};
+    tx_buffer.par_iter_mut().enumerate().for_each(|(i, cur_pix)| {
+        let h = noise_fn.get([(i % width) as f64 / scale as f64, (i / height) as f64 / scale as f64]) / 2_f64 + 0.5_f64;
+        *cur_pix = black.lerp_bounded(white, h);
+    });
+}
+
 #[test]
 fn test_square_plane_one() {
     let side_len = 2;
@@ -246,3 +333,57 @@ fn test_square_plane_two() {
 
     fill_plane_buffers(v_buffer.as_mut_slice(), indx_buffer.as_mut_slice(), side_len, PlaneType::Flat);   
 }
+
+#[test]
+fn test_add_color() {
+    let black = Color32{r: 0, g: 0, b: 0, a: 255};
+    let white = Color32{r: 255, g: 255, b: 255, a: 255};
+    let green = Color32{r: 0, g: 255, b: 0, a: 255};
+
+    assert_eq!(white + white, white);
+    assert_eq!(white + black, white);
+    assert_eq!(green + black, green);
+    assert_eq!(black + black, black);
+}
+
+#[test]
+fn test_mul_color() {
+    let black = Color32{r: 0, g: 0, b: 0, a: 255};
+    let white = Color32{r: 255, g: 255, b: 255, a: 255};
+    let green = Color32{r: 0, g: 255, b: 0, a: 255};
+
+    assert_eq!(white * 1.0, white);
+    assert_eq!(black * 1.0, black);
+    assert_eq!(green * 1.0, green);
+}
+
+#[test]
+fn test_lerp_color() {
+    let black = Color32{r: 0, g: 0, b: 0, a: 255};
+    let white = Color32{r: 255, g: 255, b: 255, a: 255};
+    assert_eq!(white.lerp(black, 0.0), white);
+    assert_eq!(white.lerp(black, 1.0), black);
+    assert_eq!(white.lerp_bounded(black, -1.0), white);
+    assert_eq!(white.lerp_bounded(black, 20.0), black);
+    assert_eq!(white.lerp_bounded(black, 0.5), Color32{r: 127, g: 127, b: 127, a: 254});
+}
+
+#[test]
+fn test_perlin_magnitude() {
+    let scale = 10;
+    let height = 100;
+    let width = 100;
+    let noise = noise::Perlin::new();
+
+    let mut sum = 0_f64;
+    for i in 0..(width * height) {
+        let h = noise.get([(i % width) as f64 / scale as f64, (i / height) as f64 / scale as f64]);
+        assert_le!(h, 1_f64);
+        assert_ge!(h, -1_f64);
+        sum += h;
+    }
+    let avg = sum / 1000.0;
+    assert_le!(avg, 0.5);
+    assert_ge!(avg, -0.5);
+}
+
