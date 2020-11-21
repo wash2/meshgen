@@ -227,6 +227,8 @@ mod unity_tests {
         assert_eq!(white.lerp(black, 1.0), black);
         assert_eq!(white.lerp_bounded(black, -1.0), white);
         assert_eq!(white.lerp_bounded(black, 20.0), black);
-        assert_eq!(white.lerp_bounded(black, 0.5), Color32{r: 127, g: 127, b: 127, a: 254});
+        assert_eq!(white.lerp_bounded(black, 0.5), Color32{r: 128, g: 128, b: 128, a: 255});
+        assert_eq!(white.lerp_bounded(black, 0.999), Color32{r: 0, g: 0, b: 0, a: 255});
+
     }
 }

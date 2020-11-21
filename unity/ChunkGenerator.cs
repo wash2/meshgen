@@ -7,7 +7,7 @@ using Unity.Collections;
 using System.Runtime.InteropServices;
 using System;
 
-public class Plane : MonoBehaviour
+public class Chunk : MonoBehaviour
 {
     [DllImport("meshgen")]
     private static extern IntPtr get_mountainous_terrain_chunkgen(UIntPtr side_len, uint seed, uint octaves, double scale, double persistence, double lacunarity);
@@ -41,7 +41,7 @@ public class Plane : MonoBehaviour
     
     public Material m_Material;
 
-    void Start()
+    public void GenerateChunk()
     {
         var t0 = Time.realtimeSinceStartup;
         chunkgen = get_mountainous_terrain_chunkgen((UIntPtr)sideLength, seed, octaves, scale, persistence, lacunarity);
