@@ -1,15 +1,19 @@
-use meshgen;
+// use meshgen;
 
 fn main() {
-    let height = 100;
-    let width = 100;
+    println!("hi");
     let scale = 10;
+    let height = 1000;
+    let width = 1000;
+    let noise = noise::Perlin::new();
 
-    let mut tex_buffer: Vec<meshgen::Color32> = vec![Default::default(); width * height];
-
-    meshgen::fill_texture_buffer_2d(tex_buffer.as_mut_slice(), width, height, scale as f32, meshgen::PlaneType::Worley);   
-    for pix in tex_buffer {
-
-        println!("{:?}", pix);
+    let mut max = 0_f64;
+    let mut max = 0_f64;
+    for i in 0..(width * height) {
+        let h = noise.get([(i % width) as f64 / scale as f64, (i / height) as f64 / scale as f64]);
+        max = f64::max(h, max);
+        min = f64::min(h, min);
     }
+    println!(max);
+    println!(min);
 }
