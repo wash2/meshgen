@@ -1,7 +1,7 @@
 extern crate more_asserts;
 
 use std::{convert::TryInto, mem, panic, ptr};
-use rayon::{prelude::*};
+use rayon::prelude::*;
 
 use crate::{MountainousTerrainNoise, Noise2D, unity::{Normal32, Position2D32, Position3D32, Quad, Tangent32, TexCoord32, Triangle, Vertex}};
 
@@ -10,7 +10,7 @@ pub trait ChunkGen2D {
     fn get_side_len(&self) -> usize;
     fn get_height(&self) -> f64;
 
-    fn fill_chunk_2d(&self, v_buffer: &mut [Vertex], indx_buffer: &mut [Quad], plane_pos: Position3D32) where Self: Sync {
+    fn fill_chunk_2d(&mut self, v_buffer: &mut [Vertex], indx_buffer: &mut [Quad], plane_pos: Position3D32) where Self: Sync {
         let half_side_len: f32 = self.get_side_len() as f32 / 2f32;
         let vert_side: i32 = (self.get_side_len() + 1).try_into().unwrap();
         let height = self.get_height();
@@ -63,13 +63,15 @@ pub struct MountainousTerrainChunkGen {
 }
 
 impl MountainousTerrainChunkGen {
-    pub fn build(side_len: usize, height: f64, seed: u32, octaves: u32, scale: f64, persistance: f64, lacunarity: f64) -> Self {
+    pub fn build(side_len: usize, height: f64, seed: u32, octaves: u32, scale: f64, persistance: f64, lacunarity: f64, displacement: f64, a: f64) -> Self {
         let my_noise = MountainousTerrainNoise::build(
             seed,
             scale,
             persistance,
             lacunarity,
             octaves,
+            displacement,
+            a
         );
         Self {
             side_len,
@@ -121,7 +123,7 @@ pub extern "C" fn fill_mountainous_terrain_chunk(chunkgen: *mut MountainousTerra
     else {
         let res = panic::catch_unwind(|| {
             unsafe {
-                let chunkgen = Box::from_raw(chunkgen);
+                let mut chunkgen = Box::from_raw(chunkgen);
                 let v_count =  (chunkgen.side_len + 1) * (chunkgen.side_len + 1);
                 let tri_count = chunkgen.side_len * chunkgen.side_len;
                 let vert_buffer: &mut [Vertex] = std::slice::from_raw_parts_mut(vert_buf, v_count);
@@ -148,8 +150,8 @@ pub extern "C" fn free_mountainous_terrain_chunkgen(mut _ptr: *mut MountainousTe
 }
 
 #[no_mangle]
-pub extern "C" fn get_mountainous_terrain_chunkgen(side_len: usize, height: f64, seed: u32, octaves: u32, scale: f64, persistence: f64, lacunarity: f64) -> *mut  MountainousTerrainChunkGen {
-    MountainousTerrainChunkGen::build(side_len, height, seed, octaves, scale, persistence, lacunarity).to_ptr()
+pub extern "C" fn get_mountainous_terrain_chunkgen(side_len: usize, height: f64, seed: u32, octaves: u32, scale: f64, persistence: f64, lacunarity: f64, displacement: f64, a: f64) -> *mut  MountainousTerrainChunkGen {
+    MountainousTerrainChunkGen::build(side_len, height, seed, octaves, scale, persistence, lacunarity, displacement, a).to_ptr()
 }
 
 #[no_mangle]
@@ -163,10 +165,10 @@ pub extern "C" fn set_mountainous_terrain_chunkgen_dim(chunkgen: *mut Mountainou
 }
 
 #[no_mangle]
-pub extern "C" fn set_mountainous_terrain_chunkgen_noise(chunkgen: *mut MountainousTerrainChunkGen, seed: u32, octaves: u32, scale: f64, persistance: f64, lacunarity: f64) {
+pub extern "C" fn set_mountainous_terrain_chunkgen_noise(chunkgen: *mut MountainousTerrainChunkGen, seed: u32, octaves: u32, scale: f64, persistance: f64, lacunarity: f64, displacement: f64, a: f64) {
     if !chunkgen.is_null() {
         let mut chunkgen = unsafe { Box::from_raw(chunkgen) };
-        chunkgen.noise = MountainousTerrainNoise::build(seed, scale, persistance, lacunarity, octaves);
+        chunkgen.noise = MountainousTerrainNoise::build(seed, scale, persistance, lacunarity, octaves, displacement, a);
         Box::leak(chunkgen);
     } 
 }

@@ -1,6 +1,6 @@
 extern crate more_asserts;
 
-use crate::{noisegen::{MountainousTerrainNoise, Noise2D}, unity::{Lerp, Position2D32, Color32}};
+use crate::{noisegen::{MountainousTerrainNoise, Noise2D}, unity::{Lerp, Position2D32, Color32}, gradient::ColorKey};
 use std::panic;
 use std::ptr;
 use rayon::{prelude::*};
@@ -9,7 +9,7 @@ pub trait TextureGen2D {
     fn get(&self, pos: Position2D32) -> f64;
     fn get_width(&self) -> usize;
     fn get_height(&self) -> usize;
-    fn fill_texture_2d(&self, tex_buffer: &mut [Color32], pos: Position2D32) where Self: Sync { 
+    fn fill_texture_2d(&self, tex_buffer: &mut [Color32], pos: Position2D32, color_gradients: &[ColorKey]) where Self: Sync { 
         // TODO: idk why this would fail, but if it can, it should match the Result of the possible failure and return a good error message
         let width = self.get_width();
         let height = self.get_height();
@@ -29,17 +29,19 @@ pub trait TextureGen2D {
 pub struct MountainousTerrainTextureGen {
     pub width: usize,
     pub height: usize,
-    pub noise: MountainousTerrainNoise
+    pub noise: MountainousTerrainNoise,
 }
 
 impl MountainousTerrainTextureGen {
-    pub fn build(width: usize, height: usize, seed: u32, octaves: u32, scale: f64, persistance: f64, lacunarity: f64) -> Self {
+    pub fn build(width: usize, height: usize, seed: u32, octaves: u32, scale: f64, persistance: f64, lacunarity: f64, displacement: f64, a: f64) -> Self {
         let my_noise = MountainousTerrainNoise::build(
             seed,
             scale,
             persistance,
             lacunarity,
             octaves,
+            displacement,
+            a,
         );
 
         Self {
@@ -92,21 +94,21 @@ pub extern "C" fn set_mountainous_terrain_texturegen_dim(texturegen: *mut Mounta
 }
 
 #[no_mangle]
-pub extern "C" fn set_mountainous_terrain_texturegen_noise(texturegen: *mut MountainousTerrainTextureGen, seed: u32, octaves: u32, scale: f64, persistance: f64, lacunarity: f64) {
+pub extern "C" fn set_mountainous_terrain_texturegen_noise(texturegen: *mut MountainousTerrainTextureGen, seed: u32, octaves: u32, scale: f64, persistance: f64, lacunarity: f64, displacement: f64, a: f64) {
     if !texturegen.is_null() {
         let mut texturegen = unsafe { Box::from_raw(texturegen) };
-        texturegen.noise = MountainousTerrainNoise::build(seed, scale, persistance, lacunarity, octaves);
+        texturegen.noise = MountainousTerrainNoise::build(seed, scale, persistance, lacunarity, octaves, displacement, a);
         Box::leak(texturegen);
     } 
 }
 
 #[no_mangle]
-pub extern "C" fn get_mountainous_terrain_texturegen(width: usize, height: usize, seed: u32, octaves: u32, scale: f64, persistance: f64, lacunarity: f64) -> *mut  MountainousTerrainTextureGen {
-    MountainousTerrainTextureGen::build(width, height, seed, octaves, scale, persistance, lacunarity).to_ptr()
+pub extern "C" fn get_mountainous_terrain_texturegen(width: usize, height: usize, seed: u32, octaves: u32, scale: f64, persistance: f64, lacunarity: f64, displacement: f64, a: f64) -> *mut  MountainousTerrainTextureGen {
+    MountainousTerrainTextureGen::build(width, height, seed, octaves, scale, persistance, lacunarity, displacement, a).to_ptr()
 }
 
 #[no_mangle]
-pub extern "C" fn fill_mountainous_terrain_texture_2d(texturegen: *mut MountainousTerrainTextureGen, bufptr: *mut Color32, pos: *mut Position2D32) -> *const u8 {
+pub extern "C" fn fill_mountainous_terrain_texture_2d(texturegen: *mut MountainousTerrainTextureGen, bufptr: *mut Color32, pos: *mut Position2D32, color_gradients: *mut ColorKey, color_count: usize) -> *const u8 {
     if texturegen.is_null() {
         "ERROR: pointer to texturegen is null\0".as_ptr()
     }
@@ -116,14 +118,18 @@ pub extern "C" fn fill_mountainous_terrain_texture_2d(texturegen: *mut Mountaino
     else if pos.is_null() {
         "ERROR: pointer to pos is null\0".as_ptr()
     }
+    else if color_gradients.is_null() {
+        "ERROR: pointer to pos is null\0".as_ptr()
+    }
     else {
         let res = panic::catch_unwind(|| {
             unsafe {
                 let texturegen = Box::from_raw(texturegen);
                 let pix_cnt = texturegen.width * texturegen.height;
                 let tx_buffer: &mut [Color32] = std::slice::from_raw_parts_mut(bufptr, pix_cnt);
+                let color_gradients: &mut [ColorKey] = std::slice::from_raw_parts_mut(color_gradients, color_count);
                 let pos = *pos;
-                texturegen.fill_texture_2d(tx_buffer, pos);
+                texturegen.fill_texture_2d(tx_buffer, pos, color_gradients);
                 Box::leak(texturegen);
             }
         });

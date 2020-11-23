@@ -7,6 +7,8 @@ mod unity;
 mod chunkgen;
 #[path = "texturegen.rs"]
 mod texturegen;
+#[path = "gradient.rs"]
+mod gradient;
 
 // re-export module ffi
 pub use chunkgen::{get_mountainous_terrain_chunkgen, free_mountainous_terrain_chunkgen, fill_mountainous_terrain_chunk};
