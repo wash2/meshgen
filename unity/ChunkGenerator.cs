@@ -1,55 +1,41 @@
-﻿using System.Collections;
-using System.Collections.Generic;
+﻿using UnityEngine;
 using UnityEngine.Rendering;
-using UnityEngine;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Collections;
-using System.Runtime.InteropServices;
+
 using System;
+using System.Runtime.InteropServices;
+using System.Collections;
+using System.Collections.Generic;
 
 public class ChunkGenerator : MonoBehaviour
 {
     [DllImport("meshgen")]
-    private static extern IntPtr get_mountainous_terrain_chunkgen(UIntPtr side_len, double height, uint seed, uint octaves, double scale, double persistence, double lacunarity, double displacement, double bias_gain_a);
+    private static extern void init_logger();
+
+    [DllImport("meshgen")]
+    private static extern IntPtr get_mountainous_terrain_chunkgen(UIntPtr side_len, double height);
     [DllImport("meshgen")]
     private static extern void free_mountainous_terrain_chunkgen(IntPtr chunkgen);
     [DllImport("meshgen")]
-    private static extern IntPtr fill_mountainous_terrain_chunk(IntPtr chunkgen, IntPtr vbuf, IntPtr ibuf, IntPtr pos);
+    private static extern IntPtr fill_mountainous_terrain_chunk(IntPtr chunkgen, IntPtr vbuf, IntPtr ibuf, IntPtr tbuf, IntPtr pos);
     [DllImport("meshgen")]
     private static extern IntPtr get_mountainous_terrain_chunk_geometry_desc(IntPtr chunkgen, out int vCnt, out int eCnt, out int fCnt);
     [DllImport("meshgen")]
     private static extern void set_mountainous_terrain_chunkgen_dim(IntPtr chunkgen, UIntPtr sideLength, double height);
     [DllImport("meshgen")]
-    private static extern void set_mountainous_terrain_chunkgen_noise(IntPtr chunkgen, uint seed, uint octaves, double scale, double persistence, double lacunarity, double displacement, double bias_gain_a);
-
+    private static extern void set_mountainous_terrain_chunkgen_noise(IntPtr chunkgen, uint seed, uint octaves, double scale, double persistence, double lacunarity, double displacement, double bias_gain_a, IntPtr bezier_from, IntPtr bezier_to, double bezier_bias_control);
     [DllImport("meshgen")]
-    private static extern IntPtr get_mountainous_terrain_texturegen(UIntPtr width, UIntPtr height,  uint seed, uint octaves, double scale, double persistence, double lacunarity, double displacement, double bias_gain_a);
-    [DllImport("meshgen")]
-    private static extern void free_mountainous_terrain_texturegen(IntPtr texturegen);
-    [DllImport("meshgen")]
-    private static extern void set_mountainous_terrain_texturegen_dim(IntPtr texturegen, UIntPtr width, UIntPtr height);
-    [DllImport("meshgen")]
-    private static extern void set_mountainous_terrain_texturegen_noise(IntPtr texturegen, uint seed, uint octaves, double scale, double persistence, double lacunarity, double displacement, double bias_gain_a);
-    [DllImport("meshgen")]
-    private static extern IntPtr fill_mountainous_terrain_texture_2d(IntPtr texturegen, IntPtr tbuf, IntPtr pos);
+    private static extern void set_mountainous_terrain_chunkgen_color_gradient(IntPtr chunkgen, IntPtr colorKeys, UIntPtr keyCnt, bool isLinearBlend);
 
     [StructLayout(LayoutKind.Sequential)]
     struct ExampleVertex
     {
         public Vector3 pos;
-        public Vector3 normal;
-        public Vector4 tangent;
+        // public Vector3 normal;
+        // public Vector4 tangent;
         public Vector2 uv;
     }
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct ColorKeyMessage
-    {
-        public IntPtr colorKeys;
-        public UIntPtr size;
-        public bool blendMode;
-    }
-
 
     IntPtr chunkgen;
     NativeArray<ExampleVertex> verts;
@@ -62,7 +48,7 @@ public class ChunkGenerator : MonoBehaviour
     IntPtr texturegen; 
 
 	public bool autoUpdate;
-    uint sideLength = 127;
+    uint sideLength = 128;
     public uint seed = 0;
     [Range(0,8)]
     public uint octaves = 3;
@@ -71,20 +57,41 @@ public class ChunkGenerator : MonoBehaviour
     public double persistence = 0.5;
     [Range(0,8)]
     public double lacunarity = 0.5;
-    public double displacement = -1.0;
+    [Range(-.1f, 2)]
+    public double displacement = -.1;
     [Range(0,1)]
     public double bias_gain_a = .5;
+    [Range(0,1)]
+    public double bezier_bias_control = .5;
+    public Vector2 bezier_bias_from = new Vector2(.4f, .01f);
+    public Vector2 bezier_bias_to = new Vector2(.55f, .15f);
     public double height = 50;
-    Vector3 offset;
+    public Vector3 offset;
     public Material m_Material;
     public float animationSpeed = 1;
     Texture2D texture;
+    MeshCollider meshCollider;
+
+    NativeArray<Color32> tex_data;
+    public CustomGradient colorGradients;
+    public AnimationCurve heightMapControl;
 
     void Start()
     {
+        init_logger();
+
         offset = new Vector3();
         mesh = new Mesh();
-        chunkgen = get_mountainous_terrain_chunkgen((UIntPtr)sideLength, height, seed, octaves, scale, persistence, lacunarity, displacement, bias_gain_a);
+        meshCollider = gameObject.AddComponent<MeshCollider>();
+        texture = new Texture2D ((int)sideLength + 1, (int)sideLength + 1);
+        tex_data = texture.GetRawTextureData<Color32>();
+        gameObject.AddComponent<MeshFilter>();
+        GetComponent<MeshFilter>().sharedMesh = mesh;
+
+        gameObject.AddComponent<MeshRenderer>();
+        GetComponent<MeshRenderer>().sharedMaterial = m_Material;
+
+        chunkgen = get_mountainous_terrain_chunkgen((UIntPtr)sideLength, height);
         var res = Marshal.PtrToStringAnsi(
             get_mountainous_terrain_chunk_geometry_desc(chunkgen, out vertexCount, out edgeCount, out faceCount)
         );
@@ -95,12 +102,6 @@ public class ChunkGenerator : MonoBehaviour
         tris = new NativeArray<int>(faceCount * 3, Allocator.Persistent);
         Debug.Log(chunkgen);
 
-        texturegen = get_mountainous_terrain_texturegen((UIntPtr)sideLength, (UIntPtr)sideLength, seed, octaves, scale, persistence, lacunarity, displacement, bias_gain_a);
-
-        gameObject.AddComponent<MeshFilter>();
-        gameObject.AddComponent<MeshRenderer>();
-        GetComponent<MeshFilter>().mesh = mesh;
-        GetComponent<MeshRenderer>().material = m_Material;
         GenerateChunk();
     }
 
@@ -113,23 +114,35 @@ public class ChunkGenerator : MonoBehaviour
     {
         var t0 = Time.realtimeSinceStartup;
         set_mountainous_terrain_chunkgen_dim(chunkgen, (UIntPtr)sideLength, height);
-        set_mountainous_terrain_chunkgen_noise(chunkgen, seed, octaves, scale, persistence, lacunarity, displacement, bias_gain_a);
-        
+        unsafe {
+            fixed(Vector2* bezier_bias_from_ptr = &bezier_bias_from, bezier_bias_to_ptr = &bezier_bias_to) {
+                set_mountainous_terrain_chunkgen_noise(chunkgen, seed, octaves, scale, persistence, lacunarity, displacement, bias_gain_a, new IntPtr(bezier_bias_from_ptr), new IntPtr(bezier_bias_to_ptr), bezier_bias_control);
+            }
+        }
+
         var layout = new[]
         {
             new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3),
-            new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3),
-            new VertexAttributeDescriptor(VertexAttribute.Tangent, VertexAttributeFormat.Float32, 4),
+            // new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3),
+            // new VertexAttributeDescriptor(VertexAttribute.Tangent, VertexAttributeFormat.Float32, 4),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2),
         };
 
         mesh.Clear();
-        
-        // fill Unity allocated NativeArray
+        var colorKeys = new NativeArray<CustomGradient.ColourKey>(colorGradients.NumKeys, Allocator.Temp);
+        var colorKeysArr = colorGradients.ToArray();
+        colorKeys.CopyFrom(colorKeysArr);
+
         unsafe {
+            set_mountainous_terrain_chunkgen_color_gradient(
+                chunkgen, 
+                new IntPtr(NativeArrayUnsafeUtility.GetUnsafePtr(colorKeys)), 
+                (UIntPtr)colorGradients.NumKeys, 
+                colorGradients.blendMode == CustomGradient.BlendMode.Linear
+            );
             fixed(Vector3* offset_ptr = &offset) {
                 var res = Marshal.PtrToStringAnsi(
-                    fill_mountainous_terrain_chunk(chunkgen, new IntPtr(NativeArrayUnsafeUtility.GetUnsafePtr(verts)), new IntPtr(NativeArrayUnsafeUtility.GetUnsafePtr(tris)), new IntPtr(offset_ptr))
+                    fill_mountainous_terrain_chunk(chunkgen, new IntPtr(NativeArrayUnsafeUtility.GetUnsafePtr(verts)), new IntPtr(NativeArrayUnsafeUtility.GetUnsafePtr(tris)), new IntPtr(NativeArrayUnsafeUtility.GetUnsafePtr(tex_data)), new IntPtr(offset_ptr))
                 );
                 if (!res.Equals("OK")) {
                     Debug.Log(res);
@@ -147,24 +160,15 @@ public class ChunkGenerator : MonoBehaviour
             var meshDesc = new UnityEngine.Rendering.SubMeshDescriptor(0, faceCount * 3, MeshTopology.Triangles);
             mesh.SetSubMesh(0, meshDesc);
             mesh.bounds = new Bounds(Vector3.zero, new Vector3(sideLength * 2, (float)height * 2, sideLength * 2));
+            mesh.RecalculateNormals();
+            texture.Apply();
 
+            GetComponent<MeshRenderer>().material.SetTexture("_BaseColorMap", texture);
+ 
+            // Finaly we set the Mesh in the MeshCollider
+            meshCollider.sharedMesh = mesh;
             Debug.Log(Time.realtimeSinceStartup - t0);
         }
-    }
-
-    Texture2D GetTexture(int width, int height) {
-        texture = new Texture2D ((int)sideLength, (int)sideLength);
-
-        // update dim
-        set_mountainous_terrain_texturegen_dim(texturegen, (UIntPtr)sideLength, (UIntPtr)sideLength);
-        set_mountainous_terrain_texturegen_noise(texturegen, seed, octaves, scale, persistence, lacunarity, displacement, bias_gain_a);
-        var data = texture.GetRawTextureData<Color32>();
-        var offset2D = new Vector2(offset.x, offset.z);
-        unsafe {
-            Vector2* offser_ptr = &offset2D;
-            fill_mountainous_terrain_texture_2d(texturegen, new IntPtr(NativeArrayUnsafeUtility.GetUnsafePtr(data)), new IntPtr(offser_ptr));
-        }
-        return texture;
     }
 
     void OnApplicationQuit()

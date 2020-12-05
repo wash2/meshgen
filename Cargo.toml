@@ -15,8 +15,13 @@ crate-type = ["dylib"]
 rayon = "1.5"
 half = "1.6"
 noise = "0.6.0"
+lyon_geom = "0.16.2"
 more-asserts = "0.2.1"
 libc = "0.2.80"
+log = "0.4.11"
+simplelog = "0.8.0"
+euclid = "0.22.1"
+
 [dependencies.rand]
 version = "0.7"
 features = ["small_rng"]

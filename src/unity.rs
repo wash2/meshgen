@@ -1,8 +1,9 @@
 extern crate more_asserts;
 
 use std::ops::{Add, Mul, Sub};
-
+use euclid::Point2D;
 use half::f16;
+use lyon_geom::CubicBezierSegment;
 
 #[derive(Clone, Copy, Default, PartialEq, PartialOrd, Debug)]
 #[repr(C)]
@@ -17,6 +18,12 @@ impl From<Position3D32> for Position2D32 {
     }
 }
 
+impl From<[f32;2]> for Position2D32 {
+    fn from(pos: [f32;2]) -> Self {
+        Position2D32 {x: pos[0], y: pos[1]}
+    }
+}
+
 impl Add for Position2D32 {
     type Output = Self;
 
@@ -24,6 +31,34 @@ impl Add for Position2D32 {
         Self {
             x: (self.x as f64 + other.x as f64).min(f32::MAX.into()).max(f32::MIN.into()) as f32,
             y: (self.y as f64 + other.y as f64).min(f32::MAX.into()).max(f32::MIN.into()) as f32,
+        }
+    }
+}
+
+impl Into<Point2D<f32, euclid::UnknownUnit>> for Position2D32 {
+    fn into(self) -> Point2D<f32, euclid::UnknownUnit> {
+        [self.x, self.y].into()
+    }
+}
+
+impl Sub for Position2D32 {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        Self {
+            x: (self.x as f64 - other.x as f64).min(f32::MAX.into()).max(f32::MIN.into()) as f32,
+            y: (self.y as f64 - other.y as f64).min(f32::MAX.into()).max(f32::MIN.into()) as f32,
+        }
+    }
+}
+
+impl Mul<f64> for Position2D32 {
+    type Output = Self;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self {
+            x: (self.x as f64 * rhs as f64).min(f32::MAX.into()).max(f32::MIN.into()) as f32,
+            y: (self.y as f64 * rhs as f64).min(f32::MAX.into()).max(f32::MIN.into()) as f32,
         }
     }
 }
@@ -98,6 +133,13 @@ pub struct Vertex {
     pub uv: TexCoord32,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, PartialOrd, Debug)]
+#[repr(C)]
+pub struct SimpleVertex {
+    pub pos: Position3D32,
+    pub uv: TexCoord32,
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 #[repr(C)]
 pub struct Triangle {
@@ -166,6 +208,27 @@ impl Mul<f64> for Color32 {
     }
 }
 
+
+#[derive(Clone, Copy, Default, PartialEq, PartialOrd, Debug)]
+#[repr(C)]
+pub struct UnityCubicBezierSegment {
+    pub to: Position2D32,
+    pub ctrl_to: Position2D32,
+    pub from: Position2D32,
+    pub ctrl_from: Position2D32,    
+}
+
+impl From<UnityCubicBezierSegment> for CubicBezierSegment<f32> {
+    fn from(unity_segment: UnityCubicBezierSegment) -> Self {
+        CubicBezierSegment{
+            from: unity_segment.from.into(), 
+            to: unity_segment.to.into(), 
+            ctrl1: unity_segment.ctrl_to.into(), 
+            ctrl2: unity_segment.ctrl_from.into()
+        }
+    }
+}
+
 pub trait Lerp {
     fn lerp(self, other: Self, t: f64) -> Self;
     fn lerp_bounded(self, other: Self, t: f64) -> Self;
@@ -229,6 +292,5 @@ mod unity_tests {
         assert_eq!(white.lerp_bounded(black, 20.0), black);
         assert_eq!(white.lerp_bounded(black, 0.5), Color32{r: 128, g: 128, b: 128, a: 255});
         assert_eq!(white.lerp_bounded(black, 0.999), Color32{r: 0, g: 0, b: 0, a: 255});
-
     }
 }
